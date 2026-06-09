@@ -1,0 +1,16 @@
+.env
+__pycache__/
+.venv/
+.pytest_cache/
+data/output/
+data/debug/
+*.pyc
+.DS_Store
+
+# Local Netlify folder
+.netlify
+data/input/
+web/public/
+
+# StatiCrypt local salt config
+.staticrypt.json

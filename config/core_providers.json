@@ -1,0 +1,15 @@
+[
+  { "provider_slug": "siliconflow", "provider_name": "SiliconFlow" },
+  { "provider_slug": "deepseek", "provider_name": "DeepSeek" },
+  { "provider_slug": "gmicloud", "provider_name": "GMICloud" },
+  { "provider_slug": "alibaba", "provider_name": "Alibaba Cloud Int." },
+  { "provider_slug": "stepfun", "provider_name": "StepFun" },
+  { "provider_slug": "moonshotai", "provider_name": "Moonshot AI" },
+  { "provider_slug": "minimax", "provider_name": "MiniMax" },
+  { "provider_slug": "atlas-cloud", "provider_name": "AtlasCloud" },
+  { "provider_slug": "xiaomi", "provider_name": "Xiaomi" },
+  { "provider_slug": "z-ai", "provider_name": "Z.ai" },
+  { "provider_slug": "baidu", "provider_name": "Baidu Qianfan" },
+  { "provider_slug": "novita", "provider_name": "NovitaAI" },
+  { "provider_slug": "streamlake", "provider_name": "StreamLake" }
+]

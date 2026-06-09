@@ -1,0 +1,9 @@
+# Netlify config for the public OpenRouter monitoring dashboard.
+# Publishes web/public (HTML + chart.js only — never the .xlsx workbooks),
+# and gates every route behind a Basic-Auth password edge function.
+[build]
+  publish = "public"
+
+[[edge_functions]]
+  path = "/*"
+  function = "auth"
