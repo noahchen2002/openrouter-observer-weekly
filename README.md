@@ -5,6 +5,18 @@
 1. `AI Model Rankings`：每周监控 OpenRouter Top Models 排名和用量。
 2. `Model Provider Price&Uptime&Usage`：按模型监控 provider 价格、稳定性和每日承接用量。
 3. `Core Model Usage`：汇总 `core_models.json` 中重点关注模型在指定 ISO 周的 Activity 日用量与周占比。
+4. `SiliconFlow Top 30 Base Sync`：读取飞书邮箱里的 Top 30 报表附件，去重后同步到多维表格，并维护用户在榜标签。
+
+## SiliconFlow Top 30 Base Sync
+
+```bash
+python3 scripts/top30_base_sync.py --dry-run
+python3 scripts/top30_base_sync.py
+python3 scripts/install_top30_base_sync_launchd.py --load
+```
+
+默认计划任务在每周一 09:10、每周四 12:10 运行。详细规则见
+[`docs/top30-base-sync.md`](docs/top30-base-sync.md)。
 
 ## 配置文件
 
