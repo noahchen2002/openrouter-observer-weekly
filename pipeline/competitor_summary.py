@@ -62,6 +62,16 @@ class ModelCompetition:
             return self.rows
         return self.rows[: self.sf_rank - 1]
 
+    @property
+    def sf_captured(self) -> bool:
+        """True when SiliconFlow serves the model AND its daily uptake was captured.
+
+        A 未展示 SF row (endpoint exists — has price/uptime — but the day's uptake
+        wasn't scraped) has uptake_tokens<0: SF 仍承接，只是当日用量未知。
+        """
+        sf = self.sf_row
+        return sf is not None and sf.uptake_tokens >= 0
+
 
 def iso_week_start(target_date: date) -> date:
     return target_date - timedelta(days=target_date.weekday())
@@ -116,10 +126,14 @@ def collect_competition(week_start: date, day: date, *, provider_path: Path | No
                 day_text = day_val.isoformat() if isinstance(day_val, date) else str(day_val or "").strip()[:10]
                 if di is not None and day_text != target:
                     continue
-                if str(c(ti) or "").strip() != STATUS_SHOWN:
-                    continue
                 prov = str(c(pi) or "").strip()
                 if not prov:
+                    continue
+                is_sf = normalize_for_match(prov) in SILICONFLOW_KEYS
+                # SiliconFlow 是监控主体：只要它在 provider 列表里有行（=有 endpoint，
+                # 带价格/uptime），即便当日用量未抓到（展示状态=未展示）也保留，否则会被
+                # 误判成"SF未承接"。其它 provider 仍只取"已展示"。
+                if not is_sf and str(c(ti) or "").strip() != STATUS_SHOWN:
                     continue
                 tok = parse_compact_number(str(c(ui) or "").strip())
                 rows.append(
@@ -131,7 +145,7 @@ def collect_competition(week_start: date, day: date, *, provider_path: Path | No
                         output_price=_num(c(opi)),
                         cache_price=_num(c(ci)),
                         uptime=_num(c(upi)),
-                        is_sf=normalize_for_match(prov) in SILICONFLOW_KEYS,
+                        is_sf=is_sf,
                     )
                 )
             rows.sort(key=lambda x: x.uptake_tokens, reverse=True)
@@ -309,7 +323,7 @@ def _merged_table(models: list["ModelCompetition"], prior: dict | None = None, s
                 "e5xx": _fmt_5xx_cell(codes),
             })
             continue
-        for r in m.competitors_above:
+        for r in m.competitors_above[:NO_SF_TOP_N]:
             rows.append({
                 "model": label,
                 "prov": _abbr(r.provider),
@@ -323,7 +337,8 @@ def _merged_table(models: list["ModelCompetition"], prior: dict | None = None, s
         rows.append({
             "model": label,
             "prov": "✅SF",
-            "vol": _vol_cell(sf, prior, m.model_slug),
+            # 有 endpoint 但当日用量未抓到 → 明确标注，避免被读成"0"或"未承接"。
+            "vol": _vol_cell(sf, prior, m.model_slug) if sf.uptake_tokens >= 0 else "用量未抓到",
             "inp": _fmt_price(sf.input_price),
             "out": _fmt_price(sf.output_price),
             "up": _fmt_uptime(sf.uptime),
@@ -370,11 +385,13 @@ def build_competitor_card(
             f"环比对比前天（{prior_day.strftime('%m-%d')}）· 关注排在硅基流动前面的厂商"
         )
 
-    lead = sum(1 for m in models if m.sf_rank == 1)
-    trail = sum(1 for m in models if m.sf_rank and m.sf_rank > 1)
+    lead = sum(1 for m in models if m.sf_captured and m.sf_rank == 1)
+    trail = sum(1 for m in models if m.sf_captured and m.sf_rank and m.sf_rank > 1)
+    uncap = sum(1 for m in models if m.sf_row is not None and not m.sf_captured)
     no_sf = sum(1 for m in models if m.sf_row is None)
     overall = (
         f"**硅基流动**：{len(models)} 个核心模型中领跑 {lead} 个，落后 {trail} 个"
+        + (f"，用量未抓 {uncap} 个" if uncap else "")
         + (f"，未承接 {no_sf} 个" if no_sf else "")
         + "（下列为各模型领先我们的竞品）"
     )
@@ -394,6 +411,8 @@ def build_competitor_card(
         di += 1
         if m.sf_row is None:
             base = f"{dot} **{m.display_name}**：硅基未承接（共 {m.shown_count} 家承接，详见下表）"
+        elif not m.sf_captured:
+            base = f"{dot} **{m.display_name}**：硅基承接，但当日用量未抓到（价格/Uptime 见下表）"
         elif m.sf_rank == 1:
             base = f"{dot} **{m.display_name}**：🥇 硅基第 1/{m.shown_count}（领跑）"
         else:
