@@ -2,7 +2,9 @@
   "deepseek/deepseek-v4-flash",
   "deepseek/deepseek-v4-pro",
   "deepseek/deepseek-v3.2",
+  "moonshotai/kimi-k2.7-code",
   "moonshotai/kimi-k2.6",
+  "z-ai/glm-5.2",
   "z-ai/glm-5.1",
   "z-ai/glm-5",
   "tencent/hy3-preview"
