@@ -195,6 +195,23 @@ def _prior_uptake_lookup(day: date) -> dict[tuple[str, str], float]:
     return out
 
 
+def _prior_price_lookup(day: date) -> dict[tuple[str, str], tuple]:
+    """(model_slug, provider) -> (input, output, cache) 前天价格，用于价格变动标记。
+
+    与 _prior_uptake_lookup 同源（前天 ISO 周工作簿，处理跨周）；缺文件时优雅返空。
+    """
+    prior_day = day - timedelta(days=1)
+    try:
+        prior_models = collect_competition(iso_week_start(prior_day), prior_day)
+    except FileNotFoundError:
+        return {}
+    out: dict[tuple[str, str], tuple] = {}
+    for m in prior_models:
+        for r in m.rows:
+            out[(m.model_slug, r.provider)] = (r.input_price, r.output_price, r.cache_price)
+    return out
+
+
 def _fmt_delta(cur: float, prior: float | None) -> str:
     """Day-over-day vs 前天: ▲/▼ with %, 新 for no prior, '' when n/a."""
     if cur is None or cur < 0:
@@ -263,6 +280,29 @@ def _vol_cell(row: "ProviderRow", prior: dict, model_slug: str) -> str:
     return f"{vol} {delta}" if delta else vol
 
 
+def _price_arrow(cur: float | None, prior: float | None) -> str:
+    """价格较前天涨跌：▲（涨）/▼（跌）/''（不变 · 无对比 · 缺值）。"""
+    if cur is None or prior is None:
+        return ""
+    if abs(cur - prior) < 1e-9:
+        return ""
+    return "▲" if cur > prior else "▼"
+
+
+def _in_cell(row: "ProviderRow", prior_prices: dict, model_slug: str) -> str:
+    """In 价 + 较前天▲▼；若 Cache 价也变了，追加「缓▲/缓▼」（Cache 无独立列）。"""
+    pin, _pout, pcache = prior_prices.get((model_slug, row.provider), (None, None, None))
+    cell = f"{_fmt_price(row.input_price)}{_price_arrow(row.input_price, pin)}"
+    ca = _price_arrow(row.cache_price, pcache)
+    return f"{cell} 缓{ca}" if ca else cell
+
+
+def _out_cell(row: "ProviderRow", prior_prices: dict, model_slug: str) -> str:
+    """Out 价 + 较前天▲▼。"""
+    _pin, pout, _pcache = prior_prices.get((model_slug, row.provider), (None, None, None))
+    return f"{_fmt_price(row.output_price)}{_price_arrow(row.output_price, pout)}"
+
+
 def _fmt_429_cell(codes: dict | None) -> str:
     """当日429 格：无数据→—，0→0，>0→⚠️粗体千分位。"""
     if not codes or codes.get("429") is None:
@@ -280,13 +320,20 @@ def _fmt_5xx_cell(codes: dict | None) -> str:
     return f"⚠️{s}" if (a or b) else s
 
 
-def _merged_table(models: list["ModelCompetition"], prior: dict | None = None, status: dict | None = None) -> dict:
+def _merged_table(
+    models: list["ModelCompetition"],
+    prior: dict | None = None,
+    status: dict | None = None,
+    prior_prices: dict | None = None,
+) -> dict:
     """One native table for all models (Feishu caps tables-per-card). Each model's
     competitors-above-SF plus the SF row, grouped, with a colored 模型 column. The
-    调用量 cell carries a day-over-day 环比 (▲/▼ vs 前天); the 当日429 and 502/504
+    调用量 cell carries a day-over-day 环比 (▲/▼ vs 前天); In/Out 价格格内 ▲/▼ 标记较
+    前天涨跌（In 格内若出现「缓▲/缓▼」表示 Cache 价也变了）; the 当日429 and 502/504
     columns are SiliconFlow's error counts for the model, shown on the ✅SF row only."""
     prior = prior or {}
     status = status or {}
+    prior_prices = prior_prices or {}
     rows = []
     dot_i = 0
     # 硅基尚未承接的模型（如新上线模型）只展示头部这么多承接厂商，避免卡片过长。
@@ -306,8 +353,8 @@ def _merged_table(models: list["ModelCompetition"], prior: dict | None = None, s
                     "model": label,
                     "prov": _abbr(r.provider),
                     "vol": _vol_cell(r, prior, m.model_slug),
-                    "inp": _fmt_price(r.input_price),
-                    "out": _fmt_price(r.output_price),
+                    "inp": _in_cell(r, prior_prices, m.model_slug),
+                    "out": _out_cell(r, prior_prices, m.model_slug),
                     "up": _fmt_uptime(r.uptime),
                     "e429": "",
                     "e5xx": "",
@@ -328,8 +375,8 @@ def _merged_table(models: list["ModelCompetition"], prior: dict | None = None, s
                 "model": label,
                 "prov": _abbr(r.provider),
                 "vol": _vol_cell(r, prior, m.model_slug),
-                "inp": _fmt_price(r.input_price),
-                "out": _fmt_price(r.output_price),
+                "inp": _in_cell(r, prior_prices, m.model_slug),
+                "out": _out_cell(r, prior_prices, m.model_slug),
                 "up": _fmt_uptime(r.uptime),
                 "e429": "",  # 错误码是硅基自己的，只在 SF 行显示
                 "e5xx": "",
@@ -339,8 +386,8 @@ def _merged_table(models: list["ModelCompetition"], prior: dict | None = None, s
             "prov": "✅SF",
             # 有 endpoint 但当日用量未抓到 → 明确标注，避免被读成"0"或"未承接"。
             "vol": _vol_cell(sf, prior, m.model_slug) if sf.uptake_tokens >= 0 else "用量未抓到",
-            "inp": _fmt_price(sf.input_price),
-            "out": _fmt_price(sf.output_price),
+            "inp": _in_cell(sf, prior_prices, m.model_slug),
+            "out": _out_cell(sf, prior_prices, m.model_slug),
             "up": _fmt_uptime(sf.uptime),
             "e429": _fmt_429_cell(codes),
             "e5xx": _fmt_5xx_cell(codes),
@@ -369,6 +416,7 @@ def build_competitor_card(
 ) -> dict:
     models = collect_competition(iso_week_start(day), day)
     prior = _prior_uptake_lookup(day)
+    prior_prices = _prior_price_lookup(day)
     prior_day = day - timedelta(days=1)
 
     if provisional:
@@ -420,8 +468,8 @@ def build_competitor_card(
         rank_lines.append(base)
     elements.append({"tag": "markdown", "content": "\n".join(rank_lines)})
     elements.append({"tag": "hr"})
-    elements.append({"tag": "markdown", "content": "**各模型领先硅基的竞品明细**（✅SF=硅基流动，色点区分模型；调用量格内 ▲▼=环比前天；当日429/502/504=硅基错误码数，仅 SF 行）"})
-    elements.append(_merged_table(models, prior, status))
+    elements.append({"tag": "markdown", "content": "**各模型领先硅基的竞品明细**（✅SF=硅基流动，色点区分模型；调用量格内 ▲▼=环比前天；In/Out 价格格内 ▲▼=较前天涨跌，「缓▲▼」=Cache 价变动；当日429/502/504=硅基错误码数，仅 SF 行）"})
+    elements.append(_merged_table(models, prior, status, prior_prices))
     elements.append({"tag": "hr"})
 
     if ai_text:
@@ -439,7 +487,7 @@ def build_competitor_card(
         })
     elements.append({
         "tag": "markdown",
-        "content": "<font color='grey'>价格 $/M tokens · ✅SF=硅基流动 · Dp=DeepSeek · 调用量格内 ▲▼%=环比前天 · 数值为爬取值，最终以看板为准。</font>",
+        "content": "<font color='grey'>价格 $/M tokens · ✅SF=硅基流动 · Dp=DeepSeek · 调用量格内 ▲▼%=环比前天 · In/Out 价 ▲▼=较前天涨/跌（In 格「缓▲▼」=Cache 价变动）· 数值为爬取值，最终以看板为准。</font>",
     })
 
     # Card v2 schema (required for the native table element).
