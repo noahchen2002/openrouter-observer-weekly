@@ -275,14 +275,40 @@ def _merged_table(models: list["ModelCompetition"], prior: dict | None = None, s
     status = status or {}
     rows = []
     dot_i = 0
+    # 硅基尚未承接的模型（如新上线模型）只展示头部这么多承接厂商，避免卡片过长。
+    NO_SF_TOP_N = 5
     for m in models:
-        sf = m.sf_row
-        if sf is None:
-            continue
         dot = MODEL_DOTS[dot_i % len(MODEL_DOTS)]
         dot_i += 1
         label = f"{dot}{_abbr_model(m.display_name)}"
+        sf = m.sf_row
+        codes = status.get(m.model_slug)
         # 模型名每行都填（不留空），否则手机上分组的空行看不到归属。
+        if sf is None:
+            # 硅基未承接：仍展示该模型，列出头部承接厂商，末行标「❌SF未承接」，
+            # 这样新上线 / 硅基暂未承接的模型也能持续监控竞争格局。
+            for r in m.rows[:NO_SF_TOP_N]:
+                rows.append({
+                    "model": label,
+                    "prov": _abbr(r.provider),
+                    "vol": _vol_cell(r, prior, m.model_slug),
+                    "inp": _fmt_price(r.input_price),
+                    "out": _fmt_price(r.output_price),
+                    "up": _fmt_uptime(r.uptime),
+                    "e429": "",
+                    "e5xx": "",
+                })
+            rows.append({
+                "model": label,
+                "prov": "❌SF未承接",
+                "vol": "—",
+                "inp": "-",
+                "out": "-",
+                "up": "-",
+                "e429": _fmt_429_cell(codes),
+                "e5xx": _fmt_5xx_cell(codes),
+            })
+            continue
         for r in m.competitors_above:
             rows.append({
                 "model": label,
@@ -294,7 +320,6 @@ def _merged_table(models: list["ModelCompetition"], prior: dict | None = None, s
                 "e429": "",  # 错误码是硅基自己的，只在 SF 行显示
                 "e5xx": "",
             })
-        codes = status.get(m.model_slug)
         rows.append({
             "model": label,
             "prov": "✅SF",
@@ -347,7 +372,12 @@ def build_competitor_card(
 
     lead = sum(1 for m in models if m.sf_rank == 1)
     trail = sum(1 for m in models if m.sf_rank and m.sf_rank > 1)
-    overall = f"**硅基流动**：{len(models)} 个核心模型中领跑 {lead} 个，落后 {trail} 个（下列为各模型领先我们的竞品）"
+    no_sf = sum(1 for m in models if m.sf_row is None)
+    overall = (
+        f"**硅基流动**：{len(models)} 个核心模型中领跑 {lead} 个，落后 {trail} 个"
+        + (f"，未承接 {no_sf} 个" if no_sf else "")
+        + "（下列为各模型领先我们的竞品）"
+    )
 
     elements: list[dict] = [
         {"tag": "markdown", "content": note},
@@ -360,11 +390,10 @@ def build_competitor_card(
     rank_lines = []
     di = 0
     for m in models:
-        dot = MODEL_DOTS[di % len(MODEL_DOTS)] if m.sf_row is not None else "·"
-        if m.sf_row is not None:
-            di += 1
+        dot = MODEL_DOTS[di % len(MODEL_DOTS)]
+        di += 1
         if m.sf_row is None:
-            base = f"· **{m.display_name}**：硅基当日未展示"
+            base = f"{dot} **{m.display_name}**：硅基未承接（共 {m.shown_count} 家承接，详见下表）"
         elif m.sf_rank == 1:
             base = f"{dot} **{m.display_name}**：🥇 硅基第 1/{m.shown_count}（领跑）"
         else:
